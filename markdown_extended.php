@@ -17,6 +17,7 @@ class MarkdownExtraExtended_Parser extends MarkdownExtra_Parser {
 		
 		$this->block_gamut += array(
 			"doFencedFigures" => 7,
+			"doTodoLists" => 35
 		);
 		
 		parent::MarkdownExtra_Parser();
@@ -156,6 +157,94 @@ class MarkdownExtraExtended_Parser extends MarkdownExtra_Parser {
 		}
 		$res .= "</figure>";		
 		return "\n". $this->hashBlock($res)."\n\n";
+	}
+
+	function doTodoLists($text) {
+	#
+	# Form HTML todo lists
+	#
+		$less_than_tab = $this->tab_width - 1;
+
+		# Re-usable patterns to match todo list
+		$marker_re  = '\[[\*\s]\]';
+
+		# Re-usable pattern to match any entire todo list:
+		$whole_list_re = '
+			(					# $1 = whole list
+			  (					# $2
+				([ ]{0,'.$less_than_tab.'})	# $3 = number of spaces
+				('.$marker_re.')		# $4 = first list item marker
+				[ ]+
+			  )
+			  (?s:.+?)
+			  (					# $5
+				  \z
+				|
+				  \n{2,}
+				  (?=\S)
+			  )
+			)
+		';
+
+		$text = preg_replace_callback('{
+				^
+				'.$whole_list_re.'
+			}mx',
+			array(&$this, '_doTodoLists_callback'), $text);
+
+		return $text;
+	}
+	function _doTodoLists_callback($matches) {
+		$list = $matches[1];
+		
+		$list .= "\n";
+		$result = $this->processTodoListItems($list, $marker_re);
+		
+		$result = $this->hashBlock("<br/><div class=\"todo\">\n" . $result . "</div><br/>");
+		return "\n". $result ."\n\n";
+	}
+	function processTodoListItems($list_str) {
+		# Re-usable pattern to match todo list items
+		$marker_re  = '\[[\*\s]\]';
+
+		# trim trailing blank lines:
+		$list_str = preg_replace("/\n{2,}\\z/", "\n", $list_str);
+
+		$list_str = preg_replace_callback('{
+			(\n)?				# leading line = $1
+			(^[ ]*)				# leading whitespace = $2
+			('.$marker_re.'			# list marker and space = $3
+				(?:[ ]+|(?=\n))	# space only required if item is not empty
+			)
+			((?s:.*?))			# list item text   = $4
+			(?:(\n+(?=\n))|\n)		# tailing blank line = $5
+			(?= \n* (\z | \2 ('.$marker_re.') (?:[ ]+|(?=\n))))
+			}xm',
+			array(&$this, '_processTodoListItems_callback'), $list_str);
+		return $list_str;
+	}
+	function _processTodoListItems_callback($matches) {
+		static $item_id;
+
+		$item_id = (!isset($item_id)?1:$item_id+1);
+		$item = $matches[4];
+		$leading_line =& $matches[1];
+		$leading_space =& $matches[2];
+		$marker_space = $matches[3];
+		$tailing_blank_line =& $matches[5];
+
+		if ($leading_line || $tailing_blank_line || 
+			preg_match('/\n{2,}/', $item))
+		{
+			# Replace marker with the appropriate whitespace indentation
+			$item = $leading_space . str_repeat(' ', strlen($marker_space)) . $item;
+			$item = $this->runBlockGamut($this->outdent($item)."\n");
+		}
+
+		if (preg_match('/\[\*\]/', $marker_space))
+			return '<div>  ☑︎  ' . $item . "</div>\n";
+		else
+			return '<div>  ☐  ' . $item . "</div>\n";
 	}
 }
 ?>
